@@ -83,7 +83,7 @@ u_int32_t l7_connection::classify()
 {
   pthread_mutex_lock (&buffer_mutex);
   if(mark == NO_MATCH_YET || mark == UNTOUCHED)
-    mark = l7_classifier->classify(buffer);
+    mark = l7_classifier->classify(buffer, lengthsofar);
   else
     cerr << "NOT REACHED. should have taken care of this case already.\n";
 
@@ -102,15 +102,11 @@ void l7_connection::append_to_buffer(char *app_data, unsigned int appdatalen)
 
   unsigned int length = 0, oldlength = lengthsofar;
 
-  /* Strip nulls.  Add it to the end of the current data. */
   for(unsigned int i = 0; i < buflen-lengthsofar && i < appdatalen; i++) {
-    if(app_data[i] != '\0') {
       buffer[length+oldlength] = app_data[i];
       length++;
-    }
   }
 
-  buffer[length+oldlength] = '\0';
   lengthsofar += length;
   l7printf(3, "Appended data. Length so far = %d\n", lengthsofar);
 

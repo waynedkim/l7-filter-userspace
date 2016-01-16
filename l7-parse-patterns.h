@@ -18,6 +18,9 @@
 #define L7_PARSE_PATTERNS_H
 
 using namespace std;
+
+#define PCRE2_CODE_UNIT_WIDTH 8
+#include <pcre2.h>
 #include <regex.h>
 
 int parse_pattern_file(int & cflags, int & eflags, string & pattern,

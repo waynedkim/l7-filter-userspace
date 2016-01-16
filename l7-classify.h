@@ -23,7 +23,11 @@ using namespace std;
 #include <string>
 #include <list>
 #include <sys/types.h>
+
+#define PCRE2_CODE_UNIT_WIDTH 8
+#include <pcre2.h>
 #include <regex.h>
+
 #include "l7-conntrack.h"
 
 
@@ -37,13 +41,14 @@ class l7_pattern {
   int cflags; // for regcomp
   string name;
   regex_t preg;//the compiled regex
+  pcre2_code *pcre;//pcre2 compiled regex
   char * pre_process(const char * s);
   int hex2dec(char c);
 
  public:
   l7_pattern(string name,string pattern_string,int eflags,int cflags,int mark);
   ~l7_pattern();
-  bool matches(char * buffer);
+  bool matches(char * buffer, unsigned int buflen);
   string getName();
   int getMark();
 };
@@ -57,7 +62,7 @@ class l7_classify {
  public:
   l7_classify(string filename);
   ~l7_classify();
-  int classify(char * buffer);
+  int classify(char * buffer, unsigned int buflen);
 };
 
 

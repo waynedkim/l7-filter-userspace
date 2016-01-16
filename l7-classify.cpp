@@ -53,15 +53,39 @@ l7_pattern::l7_pattern(string name, string pattern_string, int eflags,
   this->cflags = cflags;
   this->mark = mark;
   char *preprocessed = pre_process(pattern_string.c_str());
-  
-  int rc = regcomp(&preg, preprocessed, cflags);
+  int rc = 0;
+
+  if (NULL != preprocessed)
+  {
+    rc = regcomp(&preg, preprocessed, cflags);
+    free(preprocessed);
+  }
+  else
+  {
+    PCRE2_SIZE err_offset = 0;
+
+    pcre = pcre2_compile(
+        (PCRE2_SPTR)pattern_string.c_str(),
+        PCRE2_ZERO_TERMINATED,
+        PCRE2_ALT_BSUX,
+        &rc, &err_offset, NULL);
+
+    if (NULL != pcre)
+      rc = 0;
+  }
+
   if (rc != 0){
     cerr << "error compiling " << name << " -- " << pattern_string << endl;
     exit(1);
   }
-  free(preprocessed);
+
 }
 
+l7_pattern::~l7_pattern()
+{
+  if (NULL != pcre)
+    pcre2_code_free(pcre);
+}
 
 int l7_pattern::hex2dec(char c) 
 {
@@ -83,9 +107,11 @@ char * l7_pattern::pre_process(const char * s)
 {
   char * result = (char *)malloc(strlen(s) + 1);
   unsigned int sindex = 0, rindex = 0;
+  bool is_pcre2 = false;
+
   while( sindex < strlen(s) ) {
     if( sindex + 3 < strlen(s) && s[sindex] == '\\' && s[sindex+1] == 'x' && 
-	isxdigit(s[sindex + 2]) && isxdigit(s[sindex + 3]) ){
+        isxdigit(s[sindex + 2]) && isxdigit(s[sindex + 3]) ){
 
       result[rindex] = hex2dec(s[sindex + 2])*16 + hex2dec(s[sindex + 3]);
 
@@ -104,19 +130,30 @@ char * l7_pattern::pre_process(const char * s)
         case '{':
         case '}':
         case '\\':
+          is_pcre2 = true;
           cerr << "Warning: regexp contains a regexp control character, "
                << result[rindex] << ", in hex (\\x" << s[sindex + 2] 
                << s[sindex+3] << ".\nI recommend that you write this as "
                << result[rindex] << " or \\" << result[rindex] 
-               << " depending on what you meant.\n";
+               << " depending on what you meant.\n"
+               << "Try this rule with PCRE2.\n";
           break;
         case '\0':
+          is_pcre2 = true;
           cerr << "Warning: null (\\x00) in layer7 regexp. "
-               << "A null terminates the regexp string!\n";
-	  break;
+               << "A null terminates the regexp string!\n"
+               << "Try this rule with PCRE2.\n";
+          break;
         default:
           break;
       }
+
+      if (true == is_pcre2)
+      {
+        free(result);
+        return NULL;
+      }
+
       sindex += 3; /* 4 total */
     }
     else
@@ -131,12 +168,24 @@ char * l7_pattern::pre_process(const char * s)
 }
 
 
-bool l7_pattern::matches(char *buffer) 
+bool l7_pattern::matches(char *buffer, unsigned int buflen)
 {  
-  int rc = regexec(&preg, buffer, 0, NULL, eflags);
+  int rc = -1;
 
-  if(rc == 0)	return true;
-  else		return false;
+  if (NULL == pcre)
+  {
+    rc = regexec(&preg, buffer, 0, NULL, eflags);
+  }
+  else
+  {
+    pcre2_match_data *match;
+    match = pcre2_match_data_create(20, NULL);
+    rc = pcre2_match(pcre, (PCRE2_SPTR)buffer, buflen, 0, 0, match, NULL);
+    pcre2_match_data_free(match);
+    rc = (rc < 0);
+  }
+
+  return (rc == 0);
 }
 
 
@@ -328,13 +377,13 @@ int l7_classify::add_pattern_from_file(string filename, int mark)
   return 1;
 }
 
-int l7_classify::classify(char * buffer) 
+int l7_classify::classify(char * buffer, unsigned int buflen)
 {
   list<l7_pattern *>::iterator current = patterns.begin();
   while (current != patterns.end()) {
     l7printf(3, "checking against %s\n", (*current)->getName().c_str());
 
-    if((*current)->matches(buffer)){
+    if((*current)->matches(buffer, buflen)){
       l7printf(1, "matched %s\n", (*current)->getName().c_str());
       return (*current)->getMark();
     }

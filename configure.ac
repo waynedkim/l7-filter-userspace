@@ -28,7 +28,7 @@ AS_IF([test "x$with_pidfile" != xno],
     AC_DEFINE([PID_FILENAME], [NULL],
               [Do not use a PID filename on this build]))
 
-PKG_CHECK_MODULES([NFNETLINK], [libnetfilter_conntrack libnetfilter_queue])
+PKG_CHECK_MODULES([NFNETLINK], [libnetfilter_conntrack libnetfilter_queue libpcre2-8])
 AC_CHECK_LIB(pthread, main)
 
 # Checks for header files.
