@@ -39,7 +39,7 @@ extern "C" {
 l7_classify* l7_classifier;
 unsigned int buflen; // Shouldn't really be global, but it's SO much easier
 
-l7_connection::l7_connection() 
+l7_connection::l7_connection(const string key)
 {
   pthread_mutex_init(&num_packets_mutex, NULL);
   pthread_mutex_init(&buffer_mutex, NULL);
@@ -47,6 +47,7 @@ l7_connection::l7_connection()
   lengthsofar = 0;
   num_packets = 0;
   mark = 0;
+  this->key = key;
 }
 
 l7_connection::~l7_connection() 
@@ -164,27 +165,32 @@ static int l7_handle_conntrack_event(const struct nlmsghdr *nlh,
   switch (type) {
   // On the first packet, create the connection buffer, etc.
   case NFCT_T_NEW: {
-	l7printf(3, "Got event: NFCT_T_NEW\n");
+	l7_connection *conn = NULL;
 
+	l7_conntrack_handler->table_lock();
+	l7printf(3, "Got event: NFCT_T_NEW\n");
 	key = make_key_from_ct(ct);
-	if (l7_conntrack_handler->get_l7_connection(key)){
+	conn = l7_conntrack_handler->get_l7_connection_locked(key);
+	if (NULL != conn){
 	// this happens sometimes
 		cerr << "Received NFCT_MSG_NEW but already have a connection. Packets = " 
-			<< l7_conntrack_handler->get_l7_connection(key)->get_num_packets() 
-		        << endl;
+			<< conn->get_num_packets() << endl;
 		l7_conntrack_handler->remove_l7_connection(key);
 	}
-	l7_connection *thisconnection = new l7_connection();
-	l7_conntrack_handler->add_l7_connection(thisconnection, key);
-	thisconnection->key = key;
+
+	conn = new l7_connection(key);
+	l7_conntrack_handler->add_l7_connection(conn, key);
+	l7_conntrack_handler->table_unlock();
   }
   break;
   case NFCT_T_DESTROY:
+	l7_conntrack_handler->table_lock();
 	l7printf(3, "Got event: NFCT_T_DESTROY\n");
 	// clean up the connection buffer, etc.
 	key = make_key_from_ct(ct);
-	if (l7_conntrack_handler->get_l7_connection(key))
+	if (l7_conntrack_handler->get_l7_connection_locked(key))
 		l7_conntrack_handler->remove_l7_connection(key);
+	l7_conntrack_handler->table_unlock();
 	break;
   case NFCT_T_UPDATE:
 	l7printf(3, "Got event: NFCT_T_UPDATE\n");
@@ -225,13 +231,13 @@ string l7_conntrack::make_key(const unsigned char *packetdata, bool reverse) con
 	return key;
 }
 
-l7_conntrack::~l7_conntrack() 
+l7_conntrack::~l7_conntrack()
 {
   nfct_close(cth);
   pthread_mutex_destroy(&map_mutex);
 }
 
-l7_conntrack::l7_conntrack(void* l7_classifier_in) 
+l7_conntrack::l7_conntrack(void* l7_classifier_in)
 {
   pthread_mutex_init(&map_mutex, NULL);
   l7_classifier = (l7_classify *)l7_classifier_in;
@@ -244,11 +250,26 @@ l7_conntrack::l7_conntrack(void* l7_classifier_in)
   } 
 }
 
+void l7_conntrack::table_lock(void)
+{
+  pthread_mutex_lock(&map_mutex);
+}
+
+void l7_conntrack::table_unlock(void)
+{
+  pthread_mutex_unlock(&map_mutex);
+}
+
+l7_connection *l7_conntrack::get_l7_connection_locked(const string key)
+{
+  return l7_connections[key];
+}
+
 l7_connection *l7_conntrack::get_l7_connection(const string key) 
 {
   l7_connection *conn;
   pthread_mutex_lock(&map_mutex);
-  conn = l7_connections[key];
+  conn = get_l7_connection_locked(key);
   pthread_mutex_unlock(&map_mutex);
   return conn;
 }
@@ -256,17 +277,13 @@ l7_connection *l7_conntrack::get_l7_connection(const string key)
 void l7_conntrack::add_l7_connection(l7_connection* connection, 
 					const string key) 
 {
-  pthread_mutex_lock(&map_mutex);
   l7_connections[key] = connection;
-  pthread_mutex_unlock(&map_mutex);
 }
 
 void l7_conntrack::remove_l7_connection(const string key) 
 {
-  pthread_mutex_lock(&map_mutex);
   delete l7_connections[key];
   l7_connections.erase(l7_connections.find(key));
-  pthread_mutex_unlock(&map_mutex);
 }
 
 void l7_conntrack::start() 

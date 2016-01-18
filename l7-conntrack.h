@@ -34,7 +34,7 @@ class l7_connection {
   char * buffer;
   unsigned int lengthsofar;//len of data in buffer, not counting terminating \0
   string key;
-  l7_connection();
+  l7_connection(const string key);
   ~l7_connection();
   void increment_num_packets();
   int get_num_packets();
@@ -56,8 +56,11 @@ class l7_conntrack {
  public:
   l7_conntrack(void * foo);
   ~l7_conntrack();
+  void table_lock();
+  void table_unlock();
   void start();
   string make_key(const unsigned char *packetdata, bool reverse) const;
+  l7_connection* get_l7_connection_locked(const string key);
   l7_connection* get_l7_connection(const string key);
   void add_l7_connection(l7_connection *connection, const string key);
   void remove_l7_connection(const string key);
